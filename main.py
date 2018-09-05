@@ -3,6 +3,7 @@ import configparser
 import datetime
 import io
 import logging
+import re
 import subprocess
 
 
@@ -28,35 +29,65 @@ except KeyError:
     exit()
 
 
+class BadURL(Exception):
+    pass
+
+
 # telegram bot initializing
 dispatcher = updater.dispatcher
 
 
 def start(bot, update):
     bot.send_message(chat_id=update.message.chat_id,
-        text="This bot recieves youtube links and sends you it's m4a audio ")
+        text="This bot receives youtube links and sends you it's m4a audio ")
     bot.send_message(chat_id=update.message.chat_id,
-        text='Please, send valid youtube video adress')
+        text='Please, send valid youtube video address')
+
+
+def url_verify(text: str) -> str:
+    """
+    Checks if url is a youtube one, extracts video ID and returns it, otherwise raises exception
+    """
+    yt_pattern = re.compile(r'''
+    (?:http(?:s)?://)?(?:www\.)                                # non-capturing prefix match
+    ?(?:youtu\.be/|youtube\.com/                               # non-capturing domain match
+    (?:(?:watch)?\?(?:.*&)?v(?:i)?=|(?:embed|v|vi|user)/))     # non-capturing pre-vid ID syntax
+    ([^?&\"'<> #]+)                                            # captures video ID
+    ''', re.VERBOSE)
+
+    try:
+        parsed_url = yt_pattern.search(text).groups()
+        return parsed_url[0]
+    except:
+        raise BadURL
 
 
 def vidlink(bot, update):
     """
-    Upon recieving video url feeds it to youtube-dl
+    Upon receiving video url verifies it and feeds it to youtube-dl
     """
-    ytp = subprocess.Popen(["youtube-dl", "-f", "140", update.message.text, "-q", "-o", "-"],
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out, error = ytp.communicate()
-    error = error.decode('cp437')
-    if len(error) != 0:
+    url = update.message.text
+    try:
+        vidcode = url_verify(url)
+    except BadURL:
         bot.send_message(chat_id=update.message.chat_id,
-                         text=f"Command failed with {error}")
+                         text='Not a valid youtube link, sorry!')
+        return
+
+    ytp = subprocess.Popen(["youtube-dl", "-f", "140", 'https://youtu.be/' + vidcode , "-q", "-o", "-"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, errorc = ytp.communicate()
+    errorc = errorc.decode('cp437')
+    if len(errorc) != 0:
+        bot.send_message(chat_id=update.message.chat_id,
+                         text=f"Command failed with {errorc}")
         return
 
     media_file = io.BytesIO(out)
 
     ytp = subprocess.Popen(["youtube-dl", "-e", update.message.text],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out, error = ytp.communicate()
+    out, errorc = ytp.communicate()
     out = out.decode('utf-8').replace(" ", "_")
 
     bot.send_document(chat_id=update.message.chat_id,
